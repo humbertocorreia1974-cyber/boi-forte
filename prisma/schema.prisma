@@ -1,0 +1,442 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  termsAcceptedAt  DateTime?
+  id               String         @id @default(cuid())
+  name             String?
+  email            String         @unique
+  passwordHash     String
+  plan             String         @default("free")
+  // 🩹 2026-09-01: apps com múltiplos papéis (jogador/dono, recepção/vet/admin…)
+  // faziam `prisma.user.findMany({ where: { role } })` e o build quebrava
+  // (TS2353: 'role' não existe em UserWhereInput). Agora a fundação tem o campo.
+  role             String         @default("user")
+  stripeCustomerId String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  projects         Project[]
+  notifications    Notification[]
+  perfil           Perfil?
+  fazendas         Fazenda[]
+  relatorios       Relatorio[]
+  assinaturas      Assinatura[]
+  logAuditorias    LogAuditoria[]
+  perfilId         String?
+}
+
+model Project {
+  id        String   @id @default(cuid())
+  name      String
+  ownerId   String
+  owner     User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@index([ownerId])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  titulo    String
+  mensagem  String
+  tipo      String   @default("info")
+  lida      Boolean  @default(false)
+  canal     String   @default("push")
+  payload   Json?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Perfil {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id])
+  nomeCompleto String?
+  telefone     String?
+  avatarUrl    String?
+  cargo        String?
+  idioma       String   @default("pt-BR")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Fazenda {
+  id          String   @id @default(cuid())
+  ownerId     String
+  owner       User     @relation(fields: [ownerId], references: [id])
+  nome        String
+  cnpj        String?
+  cidade      String?
+  uf          String?
+  areaTotalHa Float?
+  uaPadraoKg  Float    @default(450)
+  ativa       Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  piquetes             Piquete[]
+  animais              Animal[]
+  lotes                Lote[]
+  insumos              Insumo[]
+  custos               Custo[]
+  chuvas               RegistroChuva[]
+  relatorios           Relatorio[]
+  movimentacoesEstoque MovimentacaoEstoque[]
+  eventosReprodutivos  EventoReprodutivo[]
+  protocolos           ProtocoloSanitario[]
+
+  @@index([ownerId])
+}
+
+model Piquete {
+  id             String    @id @default(cuid())
+  fazendaId      String
+  fazenda        Fazenda   @relation(fields: [fazendaId], references: [id])
+  nome           String
+  areaHa         Float
+  capacidadeUa   Float?
+  tipoPasto      String?
+  status         String    @default("disponivel")
+  ultimaOcupacao DateTime?
+  ultimoDescanso DateTime?
+  descansoDias   Int       @default(30)
+  latitude       Float?
+  longitude      Float?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  lotes            Lote[]
+  historicoRotacao HistoricoRotacao[]
+
+  @@index([fazendaId])
+}
+
+model HistoricoRotacao {
+  id           String    @id @default(cuid())
+  piqueteId    String
+  piquete      Piquete   @relation(fields: [piqueteId], references: [id])
+  loteId       String?
+  lote         Lote?     @relation(fields: [loteId], references: [id])
+  entradaEm    DateTime
+  saidaEm      DateTime?
+  diasOcupacao Int?
+  diasDescanso Int?
+  observacao   String?
+  createdAt    DateTime  @default(now())
+
+  @@index([piqueteId])
+  @@index([loteId])
+}
+
+model Animal {
+  id             String    @id @default(cuid())
+  fazendaId      String
+  fazenda        Fazenda   @relation(fields: [fazendaId], references: [id])
+  loteId         String?
+  lote           Lote?     @relation(fields: [loteId], references: [id])
+  brinco         String
+  nome           String?
+  sexo           String
+  raca           String?
+  categoria      String    @default("bezerro")
+  dataNascimento DateTime?
+  pesoAtualKg    Float?
+  pesoAlvoKg     Float?
+  gmdAtual       Float?
+  status         String    @default("ativo")
+  maeId          String?
+  mae            Animal?   @relation("ArvoreGenealogica", fields: [maeId], references: [id])
+  paiId          String?
+  pai            Animal?   @relation("ArvoreGenealogicaPai", fields: [paiId], references: [id])
+  filhosComoMae  Animal[]  @relation("ArvoreGenealogica")
+  filhosComoPai  Animal[]  @relation("ArvoreGenealogicaPai")
+  rfid           String?
+  observacao     String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  pesagens            Pesagem[]
+  aplicacoes          AplicacaoSanitaria[]
+  eventosReprodutivos EventoReprodutivo[]
+  partos              Parto[]
+  movimentacoes       MovimentacaoLote[]
+
+  @@index([fazendaId])
+  @@index([loteId])
+  @@index([maeId])
+  @@index([paiId])
+}
+
+model Lote {
+  id                String    @id @default(cuid())
+  fazendaId         String
+  fazenda           Fazenda   @relation(fields: [fazendaId], references: [id])
+  piqueteId         String?
+  piquete           Piquete?  @relation(fields: [piqueteId], references: [id])
+  nome              String
+  tipo              String    @default("engorda")
+  pesoAlvoKg        Float     @default(480)
+  gmdMeta           Float?
+  dataEntrada       DateTime?
+  dataSaidaPrevista DateTime?
+  status            String    @default("ativo")
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  animais          Animal[]
+  movimentacoes    MovimentacaoLote[]
+  custos           Custo[]
+  historicoRotacao HistoricoRotacao[]
+
+  @@index([fazendaId])
+  @@index([piqueteId])
+}
+
+model MovimentacaoLote {
+  id            String   @id @default(cuid())
+  animalId      String
+  animal        Animal   @relation(fields: [animalId], references: [id])
+  loteOrigemId  String?
+  loteDestinoId String?
+  tipo          String
+  data          DateTime @default(now())
+  motivo        String?
+  usuarioId     String?
+  createdAt     DateTime @default(now())
+  lote          Lote?    @relation(fields: [loteId], references: [id])
+  loteId        String?
+
+  @@index([animalId])
+  @@index([loteId])
+}
+
+model Pesagem {
+  id         String   @id @default(cuid())
+  animalId   String
+  animal     Animal   @relation(fields: [animalId], references: [id])
+  pesoKg     Float
+  data       DateTime @default(now())
+  gmd        Float?
+  origem     String   @default("manual")
+  balancaId  String?
+  observacao String?
+  usuarioId  String?
+  createdAt  DateTime @default(now())
+
+  @@index([animalId])
+}
+
+model ProtocoloSanitario {
+  id            String   @id @default(cuid())
+  fazendaId     String
+  fazenda       Fazenda  @relation(fields: [fazendaId], references: [id])
+  nome          String
+  descricao     String?
+  tipo          String
+  intervaloDias Int?
+  carenciaDias  Int?
+  ativo         Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  aplicacoes AplicacaoSanitaria[]
+
+  @@index([fazendaId])
+}
+
+model AplicacaoSanitaria {
+  id             String             @id @default(cuid())
+  protocoloId    String
+  protocolo      ProtocoloSanitario @relation(fields: [protocoloId], references: [id])
+  animalId       String
+  animal         Animal             @relation(fields: [animalId], references: [id])
+  insumoId       String?
+  insumo         Insumo?            @relation(fields: [insumoId], references: [id])
+  dataAplicacao  DateTime           @default(now())
+  dataVencimento DateTime?
+  dose           String?
+  responsavelId  String?
+  observacao     String?
+  createdAt      DateTime           @default(now())
+
+  @@index([protocoloId])
+  @@index([animalId])
+  @@index([insumoId])
+}
+
+model EventoReprodutivo {
+  id            String   @id @default(cuid())
+  fazendaId     String
+  fazenda       Fazenda  @relation(fields: [fazendaId], references: [id])
+  animalId      String
+  animal        Animal   @relation(fields: [animalId], references: [id])
+  tipo          String
+  data          DateTime @default(now())
+  touroId       String?
+  inseminadorId String?
+  resultado     String?
+  observacao    String?
+  createdAt     DateTime @default(now())
+
+  @@index([fazendaId])
+  @@index([animalId])
+}
+
+model Parto {
+  id               String   @id @default(cuid())
+  maeId            String
+  mae              Animal   @relation(fields: [maeId], references: [id])
+  bezerroId        String?
+  dataParto        DateTime @default(now())
+  tipoParto        String?
+  pesoNascimentoKg Float?
+  safra            String?
+  observacao       String?
+  createdAt        DateTime @default(now())
+
+  @@index([maeId])
+}
+
+model Insumo {
+  id              String    @id @default(cuid())
+  fazendaId       String
+  fazenda         Fazenda   @relation(fields: [fazendaId], references: [id])
+  nome            String
+  categoria       String
+  unidade         String    @default("kg")
+  quantidadeAtual Float     @default(0)
+  estoqueMinimo   Float     @default(0)
+  valorUnitario   Float?
+  validade        DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  movimentacoes MovimentacaoEstoque[]
+  aplicacoes    AplicacaoSanitaria[]
+
+  @@index([fazendaId])
+}
+
+model MovimentacaoEstoque {
+  id         String   @id @default(cuid())
+  insumoId   String
+  insumo     Insumo   @relation(fields: [insumoId], references: [id])
+  fazendaId  String
+  fazenda    Fazenda  @relation(fields: [fazendaId], references: [id])
+  tipo       String
+  quantidade Float
+  motivo     String?
+  usuarioId  String?
+  data       DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@index([insumoId])
+  @@index([fazendaId])
+}
+
+model Custo {
+  id               String   @id @default(cuid())
+  fazendaId        String
+  fazenda          Fazenda  @relation(fields: [fazendaId], references: [id])
+  loteId           String?
+  lote             Lote?    @relation(fields: [loteId], references: [id])
+  categoria        String
+  descricao        String?
+  valor            Float
+  data             DateTime @default(now())
+  rateioAutomatico Boolean  @default(true)
+  usuarioId        String?
+  createdAt        DateTime @default(now())
+
+  @@index([fazendaId])
+  @@index([loteId])
+}
+
+model RegistroChuva {
+  id         String   @id @default(cuid())
+  fazendaId  String
+  fazenda    Fazenda  @relation(fields: [fazendaId], references: [id])
+  data       DateTime @default(now())
+  milimetros Float
+  piqueteId  String?
+  observacao String?
+  createdAt  DateTime @default(now())
+
+  @@index([fazendaId])
+}
+
+model Relatorio {
+  id         String   @id @default(cuid())
+  fazendaId  String
+  fazenda    Fazenda  @relation(fields: [fazendaId], references: [id])
+  usuarioId  String
+  usuario    User     @relation(fields: [usuarioId], references: [id])
+  tipo       String
+  formato    String   @default("pdf")
+  parametros Json?
+  urlArquivo String?
+  status     String   @default("pendente")
+  createdAt  DateTime @default(now())
+
+  @@index([fazendaId])
+  @@index([usuarioId])
+}
+
+model Plano {
+  id             String   @id @default(cuid())
+  nome           String
+  descricao      String?
+  precoMensal    Float
+  limiteFazendas Int      @default(1)
+  limiteAnimais  Int      @default(100)
+  features       Json?
+  ativo          Boolean  @default(true)
+  stripePriceId  String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  assinaturas Assinatura[]
+}
+
+model Assinatura {
+  id                   String    @id @default(cuid())
+  userId               String
+  user                 User      @relation(fields: [userId], references: [id])
+  planoId              String
+  plano                Plano     @relation(fields: [planoId], references: [id])
+  status               String    @default("ativa")
+  stripeSubscriptionId String?
+  inicioEm             DateTime  @default(now())
+  fimEm                DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([planoId])
+}
+
+model LogAuditoria {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  fazendaId   String?
+  acao        String
+  entidade    String
+  entidadeId  String?
+  dadosAntes  Json?
+  dadosDepois Json?
+  ip          String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+}
